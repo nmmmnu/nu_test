@@ -1,6 +1,16 @@
 <?
 namespace nu_test;
 
+// using this class,
+// in order the file to lose scope completely
+class TesterIncluder{
+	static function incl($_file){
+		if (file_exists($_file)){
+			require_once $_file;
+		}
+	}
+}
+
 
 class Tester{
 	private static $methods		= array("test", "Test", "TEST");
@@ -12,18 +22,8 @@ class Tester{
 
 	private $_results	= array();
 
-	private $_inclFunc;
-
 
 	function __construct(){
-		// using anonymous function,
-		// in order the file to lose scope completely
-		$this->_inclFunc = function($file){
-			if (file_exists($file)){
-				require_once $file;
-			}
-		};
-
 		$this->assertSetup();
 	}
 
@@ -47,15 +47,23 @@ class Tester{
 		$reflection  = new \ReflectionClass($classname);
 
 		foreach(self::$methods as $classmethod){
-			foreach(self::$methodsPrefixes as $t)
-				if ($reflection->hasMethod($t . $classmethod)){
-					if ($t == "")
-						$this->_listTest[]  = array($classname, $t . $classmethod);
-					else
-						$this->_listTest2[] = array($classname, $t . $classmethod);
+			foreach(self::$methodsPrefixes as $t){
+				$classmethod = $t . $classmethod;
 
-					return;
-				}
+				if (! $reflection->hasMethod($classmethod))
+					continue;
+
+				$reflectionMethod = $reflection->getMethod($classmethod);
+				if (! $reflectionMethod->isStatic())
+					continue;
+
+				if ($t == "")
+					$this->_listTest[]  = array($classname, $classmethod);
+				else
+					$this->_listTest2[] = array($classname, $classmethod);
+
+				return;
+			}
 		}
 	}
 
@@ -63,8 +71,7 @@ class Tester{
 	function addFile($filename){
 		$cl = get_declared_classes();
 
-		$_inclFunc = $this->_inclFunc;
-		$_inclFunc($filename);
+		TesterIncluder::incl($filename);
 
 		foreach( array_diff(get_declared_classes(), $cl) as $classname )
 			$this->addClass($classname);
@@ -81,17 +88,19 @@ class Tester{
 	}
 
 
-	function start(){
+	function start($printing_results = true){
 		// check for partial tests
 		if ($this->_listTest2)
 			$this->_listTest = $this->_listTest2;
 
 		$this->doTests();
 
-		if (count($this->_results) == 0)
-			$this->printOK();
-		else
-			$this->printFAIL();
+		if ($printing_results){
+			if (count($this->_results) == 0)
+				$this->printOK();
+			else
+				$this->printFAIL();
+		}
 	}
 
 
@@ -111,7 +120,7 @@ class Tester{
 
 
 	private function printFAIL(){
-		printf("Failed %d of %d tests:\n", count($this->_results), count($this->_listTest) );
+		printf("Failed %d asserts of %d tests:\n", count($this->_results), count($this->_listTest) );
 		$i = 0;
 		foreach($this->_results as $result){
 			$i++;
@@ -120,15 +129,68 @@ class Tester{
 	}
 
 
-	static function test(){
+
+
+
+	function test2($dir, $expected, $failed){
+		$this->addDirectory(__DIR__ . "/" . $dir, $expected);
+
+		$list = count($this->_listTest2) > 0 ? $this->_listTest2 : $this->_listTest;
+
+		assert(count($list) == 1);
+
+		assert($list[0][0] ==  $expected);
+
+		$this->start(false);
+
+		assert(count($this->_results) == $failed);
+
+		if (count($this->_results) > $failed)
+			$this->printFAIL();
+	}
+
+
+	static function test1($dir, $expected, $failed = 0){
 		$t = new self();
+		$t->test2($dir, $expected, $failed);
+	}
 
-		$t->addDirectory("../../injector/injector/");
 
-		$t->start();
+	static function test(){
+		self::test1("./tests/a/", "nu_test\\tests\\a\\TestClass1");
+		self::test1("./tests/b/", "nu_test\\tests\\b\\TestClass1");
+		self::test1("./tests/c/", "nu_test\\tests\\c\\TestClass1", $failed = 1);
 	}
 }
 
-Tester::test();
+
+if ($argv[0] == $_SERVER["SCRIPT_FILENAME"] && count($argv) > 1 ){
+	$tester = new Tester();
+
+	foreach(array_slice($argv, 1) as $path){
+		if (is_file($path))
+			$tester->addFile($path);
+
+		if (is_dir($path))
+			$tester->addDirectory($path);
+	}
+
+	$tester->start();
+}
+
+/*
+Reflection Naive Unit Tester
+
+Scans a directory, finds all php files there, checks if there is static method test() and runs it.
+If one or more ttest() methods are found, the tester runs only them.
+
+Usage:
+	$argv[0] [file|directory] [file|directory] [file|directory] ...
+
+Hint:
+	In case of multiple files / directories, put the autoloader first.
+
+END;
+*/
 
 
